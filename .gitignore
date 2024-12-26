@@ -1,0 +1,6 @@
+.env
+__pycache__
+venv
+audio
+output
+.DS_Store
