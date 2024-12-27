@@ -4,3 +4,4 @@ venv
 audio
 output
 .DS_Store
+.gradio

@@ -5,6 +5,9 @@ import logging
 import os
 from botocore.config import Config
 from dotenv import load_dotenv
+import argparse
+
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 # Load environment variables
@@ -112,7 +115,7 @@ SYSTEM = \
 {
 "category":(从上述4个大类中选择),
 "sub_category":(从相应类别中选择具体配件)
-"confidence":(0-100%),
+"confidence": 整数(0-100), 越大置信度越高
 "comments":(如果图片不清晰，请说明无法准确识别的原因; 如有特殊安装位置或使用要求，请一并说明;如有其他可能，列出top3)
 }
 ```
@@ -123,7 +126,8 @@ SYSTEM = \
 
 """
 class ImageClassifier:
-    def __init__(self):
+    def __init__(self, model_id=LITE_MODEL_ID):
+        self.model_id = model_id
         session = boto3.session.Session(region_name=os.getenv('AWS_REGION','us-east-1'))
         self.bedrock_runtime = session.client(service_name = 'bedrock-runtime', 
                                  config=config)
@@ -146,7 +150,7 @@ class ImageClassifier:
                     ]
 
                 response = self.bedrock_runtime.converse(
-                    modelId=PRO_MODEL_ID,
+                    modelId=self.model_id,
                     messages=messages,
                     inferenceConfig={"temperature": 0.0},
                     system=[{"text":SYSTEM}]
@@ -154,12 +158,26 @@ class ImageClassifier:
                 return response['output']['message']['content'][0]['text']
         except Exception as e:
             logger.error(e)
-            return None
+            return str(e)
 
 
 if __name__ == "__main__":
-    image_path = "output/aian/frames/segment_000_38.00_39.27/segment_000_38.00_39.27_frame_0.jpg"
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--folder", help="Enter the path to your image files")
+    args = parser.parse_args()
     image_classifier = ImageClassifier()
-    response = image_classifier.process(image_path)
-    print(response)
-    
+    results = []
+    for image_path in os.listdir(args.folder):
+        #if image_path is folder
+        if os.path.isdir(os.path.join(args.folder, image_path)):
+            for sub_image_path in os.listdir(os.path.join(args.folder, image_path)):
+                if sub_image_path.endswith(('.jpg')):
+                    file_path = os.path.join(args.folder, image_path, sub_image_path)
+                    print(f"process image file:{sub_image_path}")
+                    response = image_classifier.process(file_path)
+                    json_obj = json.loads(response[:-3])
+                    print(json_obj)
+                    results.append({**json_obj,"image_file":file_path})
+
+    #example response in json
+    #{"category": "内饰类别", "sub_category": "发动机盖", "confidence": 90, "comments": "图片显示了汽车发动机舱的内部，包含发动机盖和一些管道及连接件。", "image_file":""}

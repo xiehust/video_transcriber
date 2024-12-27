@@ -1,13 +1,15 @@
 # Video Transcriber
 
-This tool transcribes speech from video files and extracts video segments containing speech. It supports both OpenAI Whisper and AWS Transcribe services for transcription.
+This tool transcribes speech from video files and extracts video segments containing speech. It supports AWS Transcribe services for transcription.
 
 ## Features
 
 - Extract audio from video files
-- Transcribe speech using either OpenAI Whisper or AWS Transcribe
+- Transcribe speech using AWS Transcribe
 - Extract video segments containing speech
 - Save transcription text alongside video segments
+- Extract keyframes
+- Classify the keyframe images
 - Support for multiple languages
 
 ## Requirements
@@ -33,21 +35,12 @@ cp .env.example .env
 
 Basic usage:
 ```bash
-python main.py --file path/to/your/video.mp4
+python webui.py
 ```
 
-Specify transcription service and language:
-```bash
-# Using OpenAI (default)
-python main.py --file video.mp4 --service openai --language Chinese
-
-# Using AWS Transcribe
-python main.py --file video.mp4 --service aws --language Chinese
-```
 
 ### Language Support
 
-- OpenAI Whisper supports multiple languages automatically
 - For AWS Transcribe, common languages are mapped to AWS language codes (e.g., "Chinese" -> "zh-CN")
 - Use "auto" for automatic language detection with AWS Transcribe
 
