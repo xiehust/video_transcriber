@@ -134,16 +134,26 @@ def create_ui():
                     language = gr.Dropdown(choices=["Chinese", "English", "auto"], value="Chinese", label="语言")
                 
                 with gr.Row():
-                    buffer = gr.Number(value=1, label="视频片段前后添加窗口 (seconds)")
-                    min_segment = gr.Number(value=1.0, label="视频片段最小长度(seconds)")
+                    buffer = gr.Number(
+                            value=1.0, 
+                            minimum=0.1,
+                            maximum=2,
+                            step=0.1,
+                            label="视频片段前后添加窗口 (seconds)")
+                    min_segment = gr.Number(
+                            value=1.0, 
+                            minimum=0.1,
+                            maximum=2,
+                            step=0.1,
+                            label="视频片段最小长度(seconds)")
                 
                 with gr.Row():
                     method = gr.Dropdown(choices=["uniform", "random", "difference"], value="uniform", label="关键帧抽取方法")
-                    num_frames = gr.Number(value=3, label="关键帧数量", precision=0)
+                    num_frames = gr.Number(value=3, minimum=1, maximum=10, label="关键帧数量", precision=0)
                 
                 with gr.Row():
-                    threshold = gr.Number(value=0.85, label="关键帧相似度阈值(只对difference方法)")
-                    min_frame_diff = gr.Number(value=0.5, label="帧之间最小间隔(seconds)")
+                    threshold = gr.Number(value=0.85, minimum=0.05, step=0.01, maximum=1.0,label="关键帧相似度阈值(只对difference方法)")
+                    min_frame_diff = gr.Number(value=0.5,minimum=0.1, step=0.1, maximum=10.0, label="帧之间最小间隔(seconds)")
                 
                 with gr.Row():
                     model_id = gr.Dropdown(
