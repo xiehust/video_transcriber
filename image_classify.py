@@ -21,6 +21,7 @@ config = Config(
 
 PRO_MODEL_ID = "us.amazon.nova-pro-v1:0"
 LITE_MODEL_ID = "us.amazon.nova-lite-v1:0"
+CLAUDE_SONNET_35_MODEL_ID = "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
 
 SYSTEM = \
 """
@@ -116,7 +117,7 @@ SYSTEM = \
 "category":(从上述4个大类中选择),
 "sub_category":(从相应类别中选择具体配件)
 "confidence": 整数(0-100), 越大置信度越高
-"comments":(如果图片不清晰，请说明无法准确识别的原因; 如有特殊安装位置或使用要求，请一并说明;如有其他可能，列出top3)
+"comments":(如果图片不清晰，请说明无法准确识别的原因; 如有特殊安装位置或使用要求，请一并说明;如有其他可能，列出top3, 不要带换行符)
 }
 ```
 
@@ -128,7 +129,17 @@ SYSTEM = \
 class ImageClassifier:
     def __init__(self, model_id=LITE_MODEL_ID):
         self.model_id = model_id
-        session = boto3.session.Session(region_name=os.getenv('AWS_REGION','us-east-1'))
+        if os.getenv('AWS_ACCESS_KEY_ID_LLM') and os.getenv('AWS_SECRET_ACCESS_KEY_LLM'):
+            session = boto3.session.Session(
+                aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID_LLM'),
+                aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY_LLM'),
+                region_name=os.getenv('AWS_REGION','us-east-1')
+            )
+        else:
+            session = boto3.session.Session(
+                region_name=os.getenv('AWS_REGION','us-east-1')
+            )
+
         self.bedrock_runtime = session.client(service_name = 'bedrock-runtime', 
                                  config=config)
 
@@ -165,7 +176,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--folder", help="Enter the path to your image files")
     args = parser.parse_args()
-    image_classifier = ImageClassifier()
+    image_classifier = ImageClassifier(model_id=CLAUDE_SONNET_35_MODEL_ID)
     results = []
     for image_path in os.listdir(args.folder):
         #if image_path is folder
@@ -175,8 +186,10 @@ if __name__ == "__main__":
                     file_path = os.path.join(args.folder, image_path, sub_image_path)
                     print(f"process image file:{sub_image_path}")
                     response = image_classifier.process(file_path)
+                    # response = response.replace("\n","\\n")
+                    print(response)
                     json_obj = json.loads(response[:-3])
-                    print(json_obj)
+                    # print(json_obj)
                     results.append({**json_obj,"image_file":file_path})
 
     #example response in json

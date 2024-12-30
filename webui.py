@@ -5,10 +5,16 @@ from pathlib import Path
 import json
 import logging
 from datetime import datetime
-from image_classify import ImageClassifier, PRO_MODEL_ID, LITE_MODEL_ID
+from image_classify import ImageClassifier, PRO_MODEL_ID, LITE_MODEL_ID, CLAUDE_SONNET_35_MODEL_ID
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+def safe_json_loads(text:str):
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return text
 
 class LogHandler(logging.Handler):
     def __init__(self, log_output):
@@ -92,7 +98,7 @@ def process_video(video_path, service, language, buffer, min_segment, method, nu
                                                 classification_result = classification_result[7:]
                                             if classification_result.endswith('```'):
                                                 classification_result = classification_result[:-3]
-                                            frame_classifications.append(json.loads(classification_result))
+                                            frame_classifications.append(safe_json_loads(classification_result))
                                         else:
                                             frame_classifications.append({"error": classification_result})
                                     except Exception as e:
@@ -129,7 +135,7 @@ def create_ui():
                 
                 with gr.Row():
                     buffer = gr.Number(value=1, label="视频片段前后添加窗口 (seconds)")
-                    min_segment = gr.Number(value=0.5, label="视频片段最小长度(seconds)")
+                    min_segment = gr.Number(value=1.0, label="视频片段最小长度(seconds)")
                 
                 with gr.Row():
                     method = gr.Dropdown(choices=["uniform", "random", "difference"], value="uniform", label="关键帧抽取方法")
@@ -142,10 +148,11 @@ def create_ui():
                 with gr.Row():
                     model_id = gr.Dropdown(
                         choices=[
+                            ('CLAUDE_SONNET_35',CLAUDE_SONNET_35_MODEL_ID),
                             ("Nova Lite", LITE_MODEL_ID),
                             ("Nova Pro", PRO_MODEL_ID)
                         ],
-                        value=LITE_MODEL_ID,
+                        value=CLAUDE_SONNET_35_MODEL_ID,
                         label="图像分类模型"
                     )
                 
