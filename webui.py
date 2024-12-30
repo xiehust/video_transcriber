@@ -98,7 +98,7 @@ def process_video(video_path, service, language, buffer, min_segment, method, nu
                                                 classification_result = classification_result[7:]
                                             if classification_result.endswith('```'):
                                                 classification_result = classification_result[:-3]
-                                            frame_classifications.append(safe_json_loads(classification_result))
+                                            frame_classifications.append(json.loads(classification_result))
                                         else:
                                             frame_classifications.append({"error": classification_result})
                                     except Exception as e:
@@ -111,7 +111,12 @@ def process_video(video_path, service, language, buffer, min_segment, method, nu
                                 "frames": frames,
                                 "classifications": frame_classifications
                             })
-
+       
+        # Saving results... to file in the output_dir
+        results_file = os.path.join(output_dir, "results.json")
+        with open(results_file, 'w', encoding='utf-8') as f:
+            json.dump(results, f, ensure_ascii=False, indent=4)
+        yield f"Saving results... to {results_file}"
         yield "Processing completed."
         yield results
 
