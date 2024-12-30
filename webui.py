@@ -135,7 +135,7 @@ def create_ui():
             with gr.Column():
                 video_input = gr.File(label="Upload Video")
                 with gr.Row():
-                    service = gr.Dropdown(choices=["aws"], value="aws", label="Transcription Service", visible=False)
+                    service = gr.Dropdown(choices=["whisper", "aws"], value="aws", label="Transcription Service", visible=True)
                     language = gr.Dropdown(choices=["Chinese", "English", "auto"], value="Chinese", label="语言")
                 
                 with gr.Row():

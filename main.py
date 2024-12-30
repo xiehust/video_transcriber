@@ -31,11 +31,11 @@ def random_string_name(length=12):
         return ''.join(random.choices(string.ascii_lowercase + string.digits, k=length))
 
 class VideoTranscriber:
-    def __init__(self, video_path, service="aws", language="Chinese"):
+    def __init__(self, video_path, service="whisper", language="Chinese"):
         """
         Initialize VideoTranscriber
         :param video_path: Path to video file
-        :param service: Transcription service to use ('aws')
+        :param service: Transcription service to use ('whisper', 'aws')
         :param language: Language of the audio
         """
         self.video_path = video_path
@@ -45,6 +45,9 @@ class VideoTranscriber:
         
         if service == "aws":
             self.aws_transcribe = TranscribeTool()
+        elif service == "whisper":
+            from whisper_transcribe import WhisperTranscribeTool
+            self.whisper_transcribe = WhisperTranscribeTool()
             
     def extract_audio(self):
         """Extract audio from video and save it temporarily"""
@@ -142,6 +145,44 @@ class VideoTranscriber:
             logger.error(f"Error during AWS transcription: {e}")
             return None
 
+    def transcribe_with_whisper(self, audio_path):
+        """Transcribe audio using Whisper"""
+        try:
+            # Prepare parameters for Whisper
+            params = {
+                'audio_path': audio_path,
+                'language': self.language if self.language.lower() != "auto" else None
+            }
+            
+            # Call Whisper
+            result = self.whisper_transcribe.invoke(params)
+            response = json.loads(result)
+            
+            if not response.get('success', False):
+                error_msg = response.get('error', 'Unknown error')
+                logger.error(f"Whisper transcription failed: {error_msg}")
+                return None
+                
+            transcript = response['result']
+            
+            # Format segments to match AWS format
+            segments = []
+            for segment in transcript['segments']:
+                segments.append({
+                    "start": segment['start'],
+                    "end": segment['end'],
+                    "text": segment['text']
+                })
+            
+            return {"segments": segments}
+            
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse Whisper response: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Error during Whisper transcription: {e}")
+            return None
+
     def extract_video_segment(self, start_time, end_time, output_path):
         """Extract a segment of video between start_time and end_time"""
         try:
@@ -169,6 +210,8 @@ class VideoTranscriber:
         yield f"Transcribing audio using {self.service}..."
         if self.service == "aws":
             transcript = self.transcribe_with_aws(audio_path)
+        elif self.service == "whisper":
+            transcript = self.transcribe_with_whisper(audio_path)
         else:
             yield f"Error: Not supported service: {self.service}"
             return
@@ -233,8 +276,8 @@ class VideoTranscriber:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--file", help="Enter the path to your video file")
-    parser.add_argument("--service", choices=[ "aws"], default="aws",
-                      help="Choose transcription service (aws)")
+    parser.add_argument("--service", choices=["whisper", "aws"], default="whisper",
+                      help="Choose transcription service (whisper, aws)")
     parser.add_argument("--language", default="Chinese",
                       help="Language of the audio (e.g., Chinese, English, auto)")
     parser.add_argument("--buffer", default=1,type=float,
