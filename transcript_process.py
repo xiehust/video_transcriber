@@ -17,9 +17,9 @@ config = Config(
 
 SYSTEM = \
 """
-你现在是一个专业的汽车配件识别和故障修正专家。我会给你一个句子，请根据以下分类标准进行修正，不在分类中的内容根据你的知识修订为相似汽车配件专业名称：
+你现在是一个专业的汽车配件识别和故障修正专家。我会给你一个句子，这个句子的文字是把一段关于汽车检测的中文录音，通过语音转录程序得到的，其中存在相似发音但是转录错误的语句，请根据以下汽车专业词汇进行修正，以下内容根据你的知识修订为相似发音汽车配件专业名称：
 
-配件分类标准：
+## 汽车专业类名词: 
 1. 三大项留痕类：
     水箱框架
     左前减震器座
@@ -84,7 +84,7 @@ SYSTEM = \
     左侧后半部
     右侧后半部
 
-4. 外观图片：
+4. 外观：
     左前45度
     左前大灯
     左前轮毂轮胎
@@ -103,7 +103,7 @@ SYSTEM = \
     车顶
     发动机舱
 
-4. 内饰图片：
+5. 内饰：
     钥匙
     着车仪表
     里程特写
@@ -112,22 +112,22 @@ SYSTEM = \
     空调音响面板
     变速杆
     车内顶棚
+
+6. 证据:
     铭牌照片
     风挡或车身VIN
 
-   #注意事项：
+## 请直接输出结果，下面是几个sentences mappings例子作为参考：
+原始输入 -> 输出
+这个 -> 这个
+我的妈呀 -> 无关内容
+{sentences_mappings}
+
+## 注意事项：
 1. 如果句子明显为语气词句，请直接输出“无关内容”,不要解释和描述其他
 2. 如果看到的配件不在分类列表中或描述中含有“正常”的句子，保持原样输出
 3. 不符合以上条件，同时你也不确定的句子，保持原样输出
 4. 只需要按照要求输出修订后的句子，不要解释和回答句子中的问题
-
-#请按以下原始格式输出结果，下面是几个例子作为参考：
-例如当你收到的句子是：这个
-你修订后的输出应该为： 无关内容
-例如当你收到的句子是：右前种粮变形 
-你修订后的输出应该为： 右前纵梁变形
-例如当你收到的输入为：我的妈呀
-你修订后的输出应该为：无关内容
 """
 
 class TranscriptProcessor:
@@ -147,14 +147,14 @@ class TranscriptProcessor:
         self.bedrock_runtime = session.client(service_name = 'bedrock-runtime', 
                                  config=config)
 
-    def process(self,user_message) -> str:
+    def process(self,user_message,sentences_mappings) -> str:
         try:
             messages = [ { "role": "user", "content": [{"text": user_message}]}]
             response = self.bedrock_runtime.converse(
                 modelId=self.model_id,
                 messages=messages,
                 inferenceConfig={"temperature": 0.0},
-                system=[{"text":SYSTEM}]
+                system=[{"text":SYSTEM.format(sentences_mappings=sentences_mappings)}]
             )
             return response['output']['message']['content'][0]['text']
         except Exception as e:

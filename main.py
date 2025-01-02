@@ -88,7 +88,7 @@ class VideoTranscriber:
             logger.error(f"Error: {e}")
             return None
 
-    def transcribe_with_aws(self, audio_path):
+    def transcribe_with_aws(self, audio_path,sentences_mappings,ignore_unrelated):
         """Transcribe audio using AWS Transcribe"""
         try:
             # Get AWS credentials from environment variables
@@ -105,7 +105,9 @@ class VideoTranscriber:
                 's3_bucket_name': s3_bucket,
                 'aws_region': aws_region,
                 'ShowSpeakerLabels': True,
-                'MaxSpeakerLabels': 2
+                'MaxSpeakerLabels': 2,
+                'sentences_mappings': sentences_mappings,
+                'ignore_unrelated':ignore_unrelated
             }
 
             # If language is specified and not "auto", add it to parameters
@@ -156,7 +158,7 @@ class VideoTranscriber:
             logger.error(f"Error extracting video segment: {e}")
             return False
 
-    def process_video(self, buffer, min_segment,output_dir="output"):
+    def process_video(self, buffer, min_segment,sentences_mappings,output_dir="output",ignore_unrelated=True):
         """Process the video file and extract segments with speech"""
         # Create output directory if it doesn't exist
         Path(output_dir).mkdir(parents=True, exist_ok=True)
@@ -168,7 +170,7 @@ class VideoTranscriber:
         # Transcribe audio using selected service
         yield f"Transcribing audio using {self.service}..."
         if self.service == "aws":
-            transcript = self.transcribe_with_aws(audio_path)
+            transcript = self.transcribe_with_aws(audio_path,sentences_mappings,ignore_unrelated)
         else:
             yield f"Error: Not supported service: {self.service}"
             return

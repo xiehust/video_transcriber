@@ -5,3 +5,5 @@ audio
 output
 .DS_Store
 .gradio
+*.mp3
+*.mp4

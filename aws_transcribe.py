@@ -165,7 +165,7 @@ class TranscribeTool():
         except Exception as e:
             return None, f"Error: {str(e)}"
 
-    def _download_and_read_transcript(self, transcript_file_uri: str, max_retries: int = 3) -> tuple[str, str, float,float]:
+    def _download_and_read_transcript(self, transcript_file_uri: str, max_retries: int = 3, sentences_mappings : str = '',ignore_unrelated:bool = True) -> tuple[str, str, float,float]:
         """
         Download and read the transcript file from the given URI.
         
@@ -202,7 +202,13 @@ class TranscribeTool():
                         start_time = segment['start_time']
                         end_time = segment['end_time']
                         transcript = segment['transcript']
-                        transcript_processed = transcipt_sentence.process(transcript)
+                        transcript_processed = transcipt_sentence.process(transcript,sentences_mappings)
+                 
+                        if transcript_processed == '无关内容':
+                            transcript_processed += f" ({transcript})"
+                            if ignore_unrelated:
+                                continue
+                
                         if has_speaker_labels:
                             speaker_label = segment['speaker_label']
                             timestamp_info = f"[{speaker_label} {start_time}s-{end_time}s]: {transcript_processed}"
@@ -256,6 +262,8 @@ class TranscribeTool():
                 s3_bucket_name = tool_parameters.get('s3_bucket_name')
                 ShowSpeakerLabels = tool_parameters.get('ShowSpeakerLabels', True)
                 MaxSpeakerLabels = tool_parameters.get('MaxSpeakerLabels', 1)
+                sentences_mappings = tool_parameters.get('sentences_mappings', '')
+                ignore_unrelated = tool_parameters.get('ignore_unrelated', False)
 
                 # Check the input params
                 if not s3_bucket_name:
@@ -310,7 +318,7 @@ class TranscribeTool():
                     return self.create_text_message(text=error)
 
                 # Download and read the transcript
-                transcript_text, error = self._download_and_read_transcript(transcript_file_uri)
+                transcript_text, error = self._download_and_read_transcript(transcript_file_uri,sentences_mappings = sentences_mappings,ignore_unrelated=ignore_unrelated)
                 if not transcript_text:
                     return self.create_text_message(text=error)
 

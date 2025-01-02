@@ -6,7 +6,7 @@ import json
 import logging
 from datetime import datetime
 from image_classify import ImageClassifier, PRO_MODEL_ID, LITE_MODEL_ID, CLAUDE_SONNET_35_MODEL_ID
-
+from extract_video_frames import extract_video_frames
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -28,7 +28,7 @@ class LogHandler(logging.Handler):
         except Exception:
             self.handleError(record)
 
-def process_video(video_path, service, language, buffer, min_segment, method, num_frames, threshold, min_frame_diff, model_id):
+def process_video(video_path, service, language, buffer, min_segment, method, num_frames, threshold, min_frame_diff, model_id, sentences_mappings,ignore_unrelated):
     # Initialize image classifier
     image_classifier = ImageClassifier(model_id=model_id)
     try:
@@ -44,13 +44,14 @@ def process_video(video_path, service, language, buffer, min_segment, method, nu
         # Process video and yield progress messages
         for message in transcriber.process_video(buffer=buffer, 
                                                min_segment=min_segment,
+                                               sentences_mappings = sentences_mappings,
+                                               ignore_unrelated = ignore_unrelated,
                                                output_dir=output_dir):
             yield message
         
         # Extract frames
         yield "Extracting frames from video segments..."
         
-        from extract_video_frames import extract_video_frames
         extract_video_frames(output_dir,
                            output_base_dir=frames_dir,
                            method=method,
@@ -137,6 +138,9 @@ def create_ui():
                 with gr.Row():
                     service = gr.Dropdown(choices=["aws"], value="aws", label="Transcription Service", visible=False)
                     language = gr.Dropdown(choices=["Chinese", "English", "auto"], value="Chinese", label="语言")
+                    sentences_mappings = gr.Textbox(label="常见口音修正字典(格式：原始 -> 正确)",
+                                                    lines=10, 
+                                                    value="七个半斤 -> 机盖钣金\n右前种粮变形 -> 右前纵梁变形")
                 
                 with gr.Row():
                     buffer = gr.Number(
@@ -170,8 +174,13 @@ def create_ui():
                         value=CLAUDE_SONNET_35_MODEL_ID,
                         label="图像分类模型"
                     )
+                    ignore_unrelated = gr.Checkbox(
+                            label="忽略无关内容",
+                            value=True,
+                            info="显示无关内容可以用于查看原始转录错误，用于添加到口音修正字典中"
+                        )
                 
-                process_btn = gr.Button("Process Video", interactive=True)
+                process_btn = gr.Button("Process Video", interactive=True,variant='primary')
                 log_output = gr.Textbox(label="Processing Log", lines=10, max_lines=10)
 
             with gr.Column():
@@ -295,11 +304,11 @@ def create_ui():
         def reset_gallery():
             return [], None
 
-        def process_with_progress(video, service_val, lang, buf, min_seg, method_val, frames, thresh, frame_diff, model_id):
+        def process_with_progress(video, service_val, lang, buf, min_seg, method_val, frames, thresh, frame_diff, model_id,sentences_mappings,ignore_unrelated):
             # Clear all outputs
             log_output.value = ""  # Clear previous logs
             try:
-                progress_gen = process_video(video, service_val, lang, buf, min_seg, method_val, frames, thresh, frame_diff, model_id)
+                progress_gen = process_video(video, service_val, lang, buf, min_seg, method_val, frames, thresh, frame_diff, model_id, sentences_mappings,ignore_unrelated)
                 results = None
                 
                 # Process all items from the generator
@@ -333,7 +342,7 @@ def create_ui():
         ).then(
             process_with_progress,  # Process video with progress updates
             inputs=[video_input, service, language, buffer, min_segment,
-                   method, num_frames, threshold, min_frame_diff, model_id],
+                   method, num_frames, threshold, min_frame_diff, model_id, sentences_mappings,ignore_unrelated],
             outputs=[log_output, results_store],
             show_progress=True
         ).then(
