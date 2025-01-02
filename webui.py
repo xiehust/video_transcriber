@@ -10,6 +10,11 @@ from extract_video_frames import extract_video_frames
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+DEFAULT_DICT="""七个半斤 -> 机盖钣金
+右前种粮变形 -> 右前纵梁变形
+右前座椅滑轨 -> 右前翼子板划痕
+"""
+
 def safe_json_loads(text:str):
     try:
         return json.loads(text)
@@ -140,7 +145,7 @@ def create_ui():
                     language = gr.Dropdown(choices=["Chinese", "English", "auto"], value="Chinese", label="语言")
                     sentences_mappings = gr.Textbox(label="常见口音修正字典(格式：原始 -> 正确)",
                                                     lines=10, 
-                                                    value="七个半斤 -> 机盖钣金\n右前种粮变形 -> 右前纵梁变形")
+                                                    value=DEFAULT_DICT)
                 
                 with gr.Row():
                     buffer = gr.Number(
