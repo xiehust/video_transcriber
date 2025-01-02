@@ -12,6 +12,9 @@ import os
 from botocore.exceptions import ClientError
 from requests.exceptions import RequestException
 import re
+from transcript_process import TranscriptProcessor, PRO_MODEL_ID, LITE_MODEL_ID, CLAUDE_SONNET_35_MODEL_ID
+
+transcipt_sentence = TranscriptProcessor(model_id=PRO_MODEL_ID)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -199,11 +202,12 @@ class TranscribeTool():
                         start_time = segment['start_time']
                         end_time = segment['end_time']
                         transcript = segment['transcript']
+                        transcript_processed = transcipt_sentence.process(transcript)
                         if has_speaker_labels:
                             speaker_label = segment['speaker_label']
-                            timestamp_info = f"[{speaker_label} {start_time}s-{end_time}s]: {transcript}"
+                            timestamp_info = f"[{speaker_label} {start_time}s-{end_time}s]: {transcript_processed}"
                         else:
-                            timestamp_info = f"[{start_time}s-{end_time}s]: {transcript}"
+                            timestamp_info = f"[{start_time}s-{end_time}s]: {transcript_processed}"
                         transcript_parts.append(f"\n{timestamp_info}")
                     return ' '.join(transcript_parts).strip(), None
                 else:
