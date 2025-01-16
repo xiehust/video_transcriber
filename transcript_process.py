@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 from image_classify import PRO_MODEL_ID,LITE_MODEL_ID, CLAUDE_SONNET_35_MODEL_ID
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(os.path.basename(__file__))
 # Load environment variables
 load_dotenv()
 config = Config(
@@ -83,6 +83,8 @@ SYSTEM = \
     右侧前半部
     左侧后半部
     右侧后半部
+    地毯水渍
+    地毯泥沙
 
 4. 外观：
     左前45度
@@ -102,6 +104,10 @@ SYSTEM = \
     驾驶位
     车顶
     发动机舱
+    后风挡
+    前档
+    后杠剐蹭
+    机盖锈蚀
 
 5. 内饰：
     钥匙
@@ -113,7 +119,7 @@ SYSTEM = \
     变速杆
     车内顶棚
 
-6. 证据:
+6. 证件:
     铭牌照片
     风挡或车身VIN
 
@@ -156,6 +162,7 @@ class TranscriptProcessor:
                 inferenceConfig={"temperature": 0.0},
                 system=[{"text":SYSTEM.format(sentences_mappings=sentences_mappings)}]
             )
+            logger.info(response['usage'])
             return response['output']['message']['content'][0]['text']
         except Exception as e:
             logger.error(e)
@@ -168,5 +175,5 @@ if __name__ == "__main__":
     #     [spk_0 22.149s-22.44s]: 我看看"
     test_text = "天蓝蓝，水清清"
     transcipt_sentence = TranscriptProcessor(model_id=CLAUDE_SONNET_35_MODEL_ID)
-    results = transcipt_sentence.process(test_text)
+    results = transcipt_sentence.process(test_text,'')
     logger.info(results)

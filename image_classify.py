@@ -6,7 +6,9 @@ import os
 from botocore.config import Config
 from dotenv import load_dotenv
 import argparse
-
+import logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(os.path.basename(__file__))
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -185,6 +187,7 @@ class ImageClassifier:
                     inferenceConfig={"temperature": 0.0},
                     system=[{"text":SYSTEM}]
                 )
+                logger.info(response['usage'])
                 return response['output']['message']['content'][0]['text']
         except Exception as e:
             logger.error(e)
@@ -195,7 +198,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--folder", help="Enter the path to your image files")
     args = parser.parse_args()
-    image_classifier = ImageClassifier(model_id=CLAUDE_SONNET_35_MODEL_ID)
+    image_classifier = ImageClassifier(model_id=LITE_MODEL_ID)
     results = []
     for image_path in os.listdir(args.folder):
         #if image_path is folder

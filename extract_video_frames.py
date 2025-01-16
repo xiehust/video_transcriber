@@ -205,7 +205,8 @@ def extract_random_clips(
         
     except Exception as e:
         return False, {"message": f"处理失败: {str(e)}"}
-    
+
+
 def extract_keyframes(
     video_path,
     output_dir,
@@ -214,7 +215,9 @@ def extract_keyframes(
     threshold=0.7,
     min_frame_diff=0.1,
     show_progress=True,
-    seed=None 
+    seed=None,
+    blur_threshold = 100  # 设置模糊度阈值，可以根据需要调整
+
 ):
     """
     从视频中提取关键帧
@@ -249,29 +252,52 @@ def extract_keyframes(
         video_name = os.path.splitext(os.path.basename(video_path))[0]
         
         if method == "uniform":
-            # 均匀提取帧
-            frame_indices = np.linspace(0, total_frames-1, num_frames, dtype=int)
+            # 均匀提取帧并计算模糊度分数
+            # step = total_frames // (num_frames * 3)  # 取3倍的帧以有更多选择
+            step = min_frame_interval
+            current_idx = 0
+            frame_scores = []
             
             if show_progress:
-                pbar = tqdm(total=len(frame_indices), desc="提取关键帧")
+                pbar = tqdm(total=num_frames, desc="分析帧清晰度")
             
-            for frame_idx in frame_indices:
-                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+            while current_idx < total_frames:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, current_idx)
                 ret, frame = cap.read()
                 if ret:
+                    # 计算模糊度分数
+                    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                    blur_score = cv2.Laplacian(gray, cv2.CV_64F).var()
+                    print(f"frame {current_idx} blur_score: {blur_score}")
+                    
+                    # 保存帧和相关信息
                     output_path = os.path.join(
                         output_dir, 
-                        f"{video_name}_frame_{frame_idx}.jpg"
+                        f"{video_name}_frame_{current_idx}.jpg"
                     )
                     cv2.imwrite(output_path, frame)
-                    keyframes.append({
-                        "frame_idx": frame_idx,
-                        "timestamp": frame_idx/fps,
-                        "path": output_path
+                    frame_scores.append({
+                        "frame_idx": current_idx,
+                        "timestamp": current_idx/fps,
+                        "path": output_path,
+                        "blur_score": blur_score
                     })
                     
-                if show_progress:
-                    pbar.update(1)
+                    if show_progress:
+                        pbar.update(1)
+                
+                current_idx += step
+            
+            # 按模糊度分数降序排序（分数越高越清晰）
+            frame_scores.sort(key=lambda x: x["blur_score"], reverse=True)
+            
+            # 只保留分数最高的num_frames帧
+            keyframes = frame_scores[:num_frames]
+            
+            # 删除未被选中的帧的图片文件
+            for frame in frame_scores[num_frames:]:
+                if os.path.exists(frame["path"]):
+                    os.remove(frame["path"])
             
             if show_progress:
                 pbar.close()
@@ -430,7 +456,8 @@ def extract_video_frames( clips_directory,
                           num_frames = 2,
                           threshold = 0.95,
                           min_frame_diff = 0.5,
-                          random_seed = None
+                          random_seed = None,
+                          blur_threshold = 100
                           ):
     results = process_video_clips(
                 clips_dir=clips_directory,
@@ -440,7 +467,8 @@ def extract_video_frames( clips_directory,
                 show_progress=False,
                 threshold=threshold,
                 min_frame_diff=min_frame_diff,
-                seed=random_seed
+                seed=random_seed,
+                blur_threshold= blur_threshold
             )
     #读取图片，并返回raw data
     print("\n处理所有视频片段的结果:")
@@ -467,10 +495,11 @@ def extract_video_frames( clips_directory,
 if __name__ == "__main__":
     # 示例用法
     extract_video_frames(
-        clips_directory="output/byd",
-        output_base_dir="output/byd/keyframes",
+        clips_directory="output/aian/20250102105754",
+        output_base_dir="output/aian/20250102105754/frames",
         method="uniform",
-        num_frames=3,
+        num_frames=1,
         threshold=0.95,
-        min_frame_diff=0.5
+        min_frame_diff=0.5,
+        blur_threshold= 100
     )

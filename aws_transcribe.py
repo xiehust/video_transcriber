@@ -14,7 +14,7 @@ from requests.exceptions import RequestException
 import re
 from transcript_process import TranscriptProcessor, PRO_MODEL_ID, LITE_MODEL_ID, CLAUDE_SONNET_35_MODEL_ID
 
-transcipt_sentence = TranscriptProcessor(model_id=CLAUDE_SONNET_35_MODEL_ID)
+transcipt_sentence = TranscriptProcessor(model_id=LITE_MODEL_ID)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -204,7 +204,7 @@ class TranscribeTool():
                         transcript = segment['transcript']
                         transcript_processed = transcipt_sentence.process(transcript,sentences_mappings)
                  
-                        if transcript_processed == '无关内容':
+                        if '无关内容' in transcript_processed :
                             transcript_processed += f" ({transcript})"
                             if ignore_unrelated:
                                 continue
@@ -215,7 +215,7 @@ class TranscribeTool():
                         else:
                             timestamp_info = f"[{start_time}s-{end_time}s]: {transcript_processed}"
                         transcript_parts.append(f"\n{timestamp_info}")
-                    return ' '.join(transcript_parts).strip(), None
+                    return ' '.join(transcript_parts).strip(), ''
                 else:
                     return None, "No transcripts found in the response"
                 

@@ -10,9 +10,12 @@ from extract_video_frames import extract_video_frames
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+gr.context.timeout = 3600*24 
+
 DEFAULT_DICT="""七个半斤 -> 机盖钣金
 右前种粮变形 -> 右前纵梁变形
 右前座椅滑轨 -> 右前翼子板划痕
+中明正常 -> 中控屏正常
 """
 
 def safe_json_loads(text:str):
@@ -149,7 +152,7 @@ def create_ui():
                 
                 with gr.Row():
                     buffer = gr.Number(
-                            value=1.0, 
+                            value=0.5, 
                             minimum=0.1,
                             maximum=2,
                             step=0.1,
@@ -163,7 +166,7 @@ def create_ui():
                 
                 with gr.Row():
                     method = gr.Dropdown(choices=["uniform", "random", "difference"], value="uniform", label="关键帧抽取方法")
-                    num_frames = gr.Number(value=3, minimum=1, maximum=10, label="关键帧数量", precision=0)
+                    num_frames = gr.Number(value=1, minimum=1, maximum=10, label="关键帧数量", precision=0)
                 
                 with gr.Row():
                     threshold = gr.Number(value=0.85, minimum=0.05, step=0.01, maximum=1.0,label="关键帧相似度阈值(只对difference方法)")
@@ -176,7 +179,7 @@ def create_ui():
                             ("Nova Lite", LITE_MODEL_ID),
                             ("Nova Pro", PRO_MODEL_ID)
                         ],
-                        value=CLAUDE_SONNET_35_MODEL_ID,
+                        value=LITE_MODEL_ID,
                         label="图像分类模型"
                     )
                     ignore_unrelated = gr.Checkbox(
