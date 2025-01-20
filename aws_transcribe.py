@@ -14,7 +14,7 @@ from requests.exceptions import RequestException
 import re
 from transcript_process import TranscriptProcessor, PRO_MODEL_ID, LITE_MODEL_ID, CLAUDE_SONNET_35_MODEL_ID
 
-transcipt_sentence = TranscriptProcessor(model_id=LITE_MODEL_ID)
+transcipt_sentence = TranscriptProcessor(model_id=PRO_MODEL_ID)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
