@@ -88,7 +88,7 @@ class VideoTranscriber:
             logger.error(f"Error: {e}")
             return None
 
-    def transcribe_with_aws(self, audio_path,sentences_mappings,ignore_unrelated):
+    def transcribe_with_aws(self, audio_path,sentences_mappings,ignore_unrelated,vocabulary_name,show_original):
         """Transcribe audio using AWS Transcribe"""
         try:
             # Get AWS credentials from environment variables
@@ -107,7 +107,9 @@ class VideoTranscriber:
                 'ShowSpeakerLabels': True,
                 'MaxSpeakerLabels': 2,
                 'sentences_mappings': sentences_mappings,
-                'ignore_unrelated':ignore_unrelated
+                'ignore_unrelated':ignore_unrelated,
+                'vocabulary_name':vocabulary_name,
+                'show_original':show_original
             }
 
             # If language is specified and not "auto", add it to parameters
@@ -158,7 +160,7 @@ class VideoTranscriber:
             logger.error(f"Error extracting video segment: {e}")
             return False
 
-    def process_video(self, buffer, min_segment,sentences_mappings,output_dir="output",ignore_unrelated=True):
+    def process_video(self, buffer, min_segment,sentences_mappings,output_dir="output",ignore_unrelated=True,vocabulary_name='',show_original=False):
         """Process the video file and extract segments with speech"""
         # Create output directory if it doesn't exist
         Path(output_dir).mkdir(parents=True, exist_ok=True)
@@ -170,7 +172,7 @@ class VideoTranscriber:
         # Transcribe audio using selected service
         yield f"Transcribing audio using {self.service}..."
         if self.service == "aws":
-            transcript = self.transcribe_with_aws(audio_path,sentences_mappings,ignore_unrelated)
+            transcript = self.transcribe_with_aws(audio_path,sentences_mappings,ignore_unrelated,vocabulary_name,show_original)
         else:
             yield f"Error: Not supported service: {self.service}"
             return
@@ -263,6 +265,7 @@ def main():
     transcriber = VideoTranscriber(video_path, service=args.service, language=args.language)
     transcriber.process_video(buffer=args.buffer,
                                 min_segment=args.minsegment,
+                                show_original=show_original,
                                 output_dir=os.path.join(args.output_base_dir,os.path.basename(video_path).split('.')[0]))
     
     timestamp = datetime.now().strftime("%Y%m%d%H%M%S")

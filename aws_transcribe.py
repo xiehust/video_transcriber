@@ -14,7 +14,7 @@ from requests.exceptions import RequestException
 import re
 from transcript_process import TranscriptProcessor, PRO_MODEL_ID, LITE_MODEL_ID, CLAUDE_SONNET_35_MODEL_ID
 
-transcipt_sentence = TranscriptProcessor(model_id=PRO_MODEL_ID)
+transcipt_sentence = TranscriptProcessor(model_id=CLAUDE_SONNET_35_MODEL_ID)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -126,10 +126,72 @@ def upload_to_s3(s3_client, file_path_or_url, bucket_name, s3_key=None, max_retr
 
     return None, "Maximum retries exceeded"
 
+    
 class TranscribeTool():
     s3_client : Any = None
     transcribe_client: Any = None
-
+    
+    def __init__(self):
+        aws_region = os.environ.get("AWS_REGION")
+        if aws_region:
+            self.transcribe_client = boto3.client("transcribe", region_name=aws_region)
+            self.s3_client = boto3.client("s3", region_name=aws_region)
+        else:
+            self.transcribe_client = boto3.client("transcribe")
+            self.s3_client = boto3.client("s3")
+    
+    def check_vocabulary_exists(self,vocabulary_name):
+        """
+        Check if a custom vocabulary exists in Amazon Transcribe
+        """        
+        try:
+            response = self.transcribe_client.get_vocabulary(VocabularyName=vocabulary_name)
+            return True, response['VocabularyState']
+        except ClientError as e:
+            if e.response['Error']['Code'] == 'NotFoundException':
+                return False, None
+            else:
+                logger.error(f"Error checking vocabulary: {e}")
+                return False, None
+            
+    def create_custom_vocabulary(self,vocabulary_name, language_code, phrases):
+        """
+        Create a custom vocabulary in Amazon Transcribe
+        """        
+        try:
+            # First check if vocabulary exists
+            exists, state = self.check_vocabulary_exists(vocabulary_name)
+            
+            if exists:
+                logger.info(f"Vocabulary '{vocabulary_name}' already exists with state: {state}")
+                if state == 'READY':
+                    return True
+                elif state == 'PENDING':
+                    logger.info("Waiting for existing vocabulary to be ready...")
+                else:
+                    logger.info(f"Existing vocabulary is in {state} state. Creating new one...")
+                    # You might want to delete the existing vocabulary here if it's in a failed state
+            
+            response = transcribe_client.create_vocabulary(
+                VocabularyName=vocabulary_name,
+                LanguageCode=language_code,
+                Phrases=phrases
+            )
+            
+            # Wait for vocabulary to be ready
+            while True:
+                status = transcribe_client.get_vocabulary(VocabularyName=vocabulary_name)
+                if status['VocabularyState'] in ['READY', 'FAILED']:
+                    break
+                logger.info("Waiting for vocabulary to be ready...")
+                time.sleep(5)
+                
+            return True if status['VocabularyState'] == 'READY' else False
+            
+        except ClientError as e:
+            logger.error(f"Error creating vocabulary: {e}")
+            return False
+    
     """
     Note that you must include one of LanguageCode, IdentifyLanguage,
     or IdentifyMultipleLanguages in your request. If you include more than one of these parameters, your transcription job fails.
@@ -165,7 +227,7 @@ class TranscribeTool():
         except Exception as e:
             return None, f"Error: {str(e)}"
 
-    def _download_and_read_transcript(self, transcript_file_uri: str, max_retries: int = 3, sentences_mappings : str = '',ignore_unrelated:bool = True) -> tuple[str, str, float,float]:
+    def _download_and_read_transcript(self, transcript_file_uri: str, max_retries: int = 3, sentences_mappings : str = '',ignore_unrelated:bool = True,show_original:bool=False) -> tuple[str, str, float,float]:
         """
         Download and read the transcript file from the given URI.
         
@@ -202,12 +264,20 @@ class TranscribeTool():
                         start_time = segment['start_time']
                         end_time = segment['end_time']
                         transcript = segment['transcript']
-                        transcript_processed = transcipt_sentence.process(transcript,sentences_mappings)
+                        if len(transcript.strip()) <= 1:# 忽略只有1个字的情况
+                            transcript_processed = '无关内容'
+                        else: 
+                            transcript_processed = transcipt_sentence.process(transcript,sentences_mappings)
+                            if len(transcript_processed) <= 1:
+                                transcript_processed = f'信息不足'
                  
-                        if '无关内容' in transcript_processed :
-                            transcript_processed += f" ({transcript})"
+                        if '无关内容' in transcript_processed or '信息不足' in transcript_processed:
+                            # transcript_processed += f" ({transcript})"
                             if ignore_unrelated:
                                 continue
+                        if show_original:
+                            transcript_processed = f"({transcript}) => {transcript_processed}"
+                            
                 
                         if has_speaker_labels:
                             speaker_label = segment['speaker_label']
@@ -244,15 +314,6 @@ class TranscribeTool():
             Invoke AWS Transcribe tool
             """
             try:
-                if not self.transcribe_client:
-                    aws_region = tool_parameters.get('aws_region')
-                    if aws_region:
-                        self.transcribe_client = boto3.client("transcribe", region_name=aws_region)
-                        self.s3_client = boto3.client("s3", region_name=aws_region)
-                    else:
-                        self.transcribe_client = boto3.client("transcribe")
-                        self.s3_client = boto3.client("s3")
-
                 file_url = tool_parameters.get('file_url')
                 file_type = tool_parameters.get('file_type')
                 language_code = tool_parameters.get('language_code')
@@ -264,6 +325,8 @@ class TranscribeTool():
                 MaxSpeakerLabels = tool_parameters.get('MaxSpeakerLabels', 1)
                 sentences_mappings = tool_parameters.get('sentences_mappings', '')
                 ignore_unrelated = tool_parameters.get('ignore_unrelated', False)
+                vocabulary_name = tool_parameters.get('vocabulary_name', '')
+                show_original = tool_parameters.get('show_original')
 
                 # Check the input params
                 if not s3_bucket_name:
@@ -300,6 +363,9 @@ class TranscribeTool():
                     extra_args['LanguageOptions'] = language_options
                 if ShowSpeakerLabels:
                     extra_args['Settings'] = {"ShowSpeakerLabels": ShowSpeakerLabels, "MaxSpeakerLabels": MaxSpeakerLabels}
+                if vocabulary_name:
+                    extra_args['Settings'] = {**extra_args['Settings'],'VocabularyName': vocabulary_name}
+                    
                 
                 if not file_url.startswith("s3://"):
                     # Upload to s3 bucket
@@ -318,7 +384,7 @@ class TranscribeTool():
                     return self.create_text_message(text=error)
 
                 # Download and read the transcript
-                transcript_text, error = self._download_and_read_transcript(transcript_file_uri,sentences_mappings = sentences_mappings,ignore_unrelated=ignore_unrelated)
+                transcript_text, error = self._download_and_read_transcript(transcript_file_uri,sentences_mappings = sentences_mappings,ignore_unrelated=ignore_unrelated,show_original=show_original)
                 if not transcript_text:
                     return self.create_text_message(text=error)
 
