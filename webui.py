@@ -80,8 +80,9 @@ def create_vocabulary(vocabulary_name, vocabulary_file):
         
         if file_ext == '.txt':
             # Read phrases from txt file
-            content = vocabulary_file.read().decode('utf-8')
-            phrases = [line.strip() for line in content.split('\n') if line.strip()]
+            with open(vocabulary_file.name, 'rb') as f:
+                content = f.read().decode('utf-8')
+                phrases = [line.strip() for line in content.split('\n') if line.strip()]
         elif file_ext in ['.csv']:
             # Read phrases from csv file
             df = pd.read_csv(vocabulary_file.name)

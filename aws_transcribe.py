@@ -151,7 +151,7 @@ class TranscribeTool():
             if e.response['Error']['Code'] == 'NotFoundException':
                 return False, None
             else:
-                logger.error(f"Error checking vocabulary: {e}")
+                logger.info(f"Error checking vocabulary: {e}")
                 return False, None
             
     def create_custom_vocabulary(self,vocabulary_name, language_code, phrases):
@@ -172,7 +172,7 @@ class TranscribeTool():
                     logger.info(f"Existing vocabulary is in {state} state. Creating new one...")
                     # You might want to delete the existing vocabulary here if it's in a failed state
             
-            response = transcribe_client.create_vocabulary(
+            response = self.transcribe_client.create_vocabulary(
                 VocabularyName=vocabulary_name,
                 LanguageCode=language_code,
                 Phrases=phrases
@@ -180,7 +180,7 @@ class TranscribeTool():
             
             # Wait for vocabulary to be ready
             while True:
-                status = transcribe_client.get_vocabulary(VocabularyName=vocabulary_name)
+                status = self.transcribe_client.get_vocabulary(VocabularyName=vocabulary_name)
                 if status['VocabularyState'] in ['READY', 'FAILED']:
                     break
                 logger.info("Waiting for vocabulary to be ready...")
