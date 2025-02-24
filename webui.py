@@ -4,12 +4,20 @@ from main import VideoTranscriber
 from pathlib import Path
 import json
 import logging
+import boto3
+from dotenv import load_dotenv
 from datetime import datetime
 from image_classify import ImageClassifier, PRO_MODEL_ID, LITE_MODEL_ID, CLAUDE_SONNET_35_MODEL_ID
 from extract_video_frames import extract_video_frames
 from aws_transcribe import TranscribeTool
 import pandas as pd
-import os
+from PIL import Image
+import io
+from utils import call_converse, call_retrieve
+# Load environment variables
+load_dotenv()
+
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -209,276 +217,367 @@ def process_video(video_path, service, language, buffer, min_segment, method, nu
         logger.error(f"Error processing video: {e}")
         raise gr.Error(str(e))
 
+def create_transcribe_ui():
+    with gr.Column():
+        gr.Markdown("""
+        # Video Transcriber and Analyzer
+        上传视频，截取初视频中有说话的片段，转录字幕，并抽取关键帧，识别图片内容
+        """)
+        with gr.Row():
+            with gr.Column():
+                video_input = gr.Video(label="Upload Video")
+                with gr.Row():
+                    service = gr.Dropdown(choices=["aws"], value="aws", label="Transcription Service", visible=False)
+                    language = gr.Dropdown(choices=["Chinese", "English", "auto"], value="Chinese", label="语言")
+                    sentences_mappings = gr.Textbox(label="常见口音修正字典(Markdown格式：原始 ｜ 正确)",
+                                                    lines=10, 
+                                                    value=DEFAULT_DICT)
+                with gr.Row():
+                    vocabulary_name = gr.Textbox(label="Transcribe自定义字典",
+                                                    lines=1,
+                                                    value=CUSTOM_VOCABULARY)
+                    vocabulary_file = gr.File(label="上传自定义字典文件(.txt或.xlsx)")
+                with gr.Row():
+                    create_vocab_btn = gr.Button("创建字典", variant='secondary')
+                    vocab_status = gr.Markdown("字典状态: 未创建")
+                
+                with gr.Row():
+                    buffer = gr.Number(
+                            value=0.5, 
+                            minimum=0.1,
+                            maximum=2,
+                            step=0.1,
+                            label="视频片段前后添加窗口 (seconds)")
+                    min_segment = gr.Number(
+                            value=1.0, 
+                            minimum=0.1,
+                            maximum=2,
+                            step=0.1,
+                            label="视频片段最小长度(seconds)")
+                
+                with gr.Row():
+                    method = gr.Dropdown(choices=["uniform", "random", "difference"], value="uniform", label="关键帧抽取方法")
+                    num_frames = gr.Number(value=1, minimum=1, maximum=10, label="关键帧数量", precision=0)
+                
+                with gr.Row():
+                    threshold = gr.Number(value=0.85, minimum=0.05, step=0.01, maximum=1.0,label="关键帧相似度阈值(只对difference方法)")
+                    min_frame_diff = gr.Number(value=0.5,minimum=0.1, step=0.1, maximum=10.0, label="帧之间最小间隔(seconds)")
+                
+                with gr.Row():
+                    model_id = gr.Dropdown(
+                        choices=[
+                            ('CLAUDE_SONNET_35',CLAUDE_SONNET_35_MODEL_ID),
+                            ("Nova Lite", LITE_MODEL_ID),
+                            ("Nova Pro", PRO_MODEL_ID)
+                        ],
+                        value=LITE_MODEL_ID,
+                        label="图像分类模型"
+                    )
+                    enable_img_classify = gr.Checkbox(
+                            label="启用关键帧分类",
+                            value=False,
+                            info="对关键帧图片分类"
+                        )
+                    ignore_unrelated = gr.Checkbox(
+                            label="忽略无关内容",
+                            value=True,
+                            info="取消可以查看原始转录错误，用于添加到口音修正字典中"
+                        )
+                    show_original = gr.Checkbox(
+                            label="显示修正前文本",
+                            value=False,
+                            info="用于查看原始转录错误，用于添加到口音修正字典中"
+                        )
+                
+                process_btn = gr.Button("Process Video", interactive=True,variant='primary')
+                log_output = gr.Textbox(label="Processing Log", lines=10, max_lines=10)
+
+            with gr.Column():
+                status_output = gr.Markdown("Ready to process video")
+                segments_list = gr.Dataframe(
+                    headers=["Segment", "Duration", "Transcript", "Classifications"],
+                    label="Processed Segments",
+                    interactive=False
+                )
+                gallery = gr.Gallery(label="Extracted Frames")
+                video_output = gr.Video(label="Video Segment")
+                text_output = gr.Textbox(label="Transcription", lines=3)
+                classification_output = gr.Textbox(label="Classification Results", lines=5)
+
+    # Store results globally for access in callbacks
+    results_store = gr.State([])
+    
+    # Handle vocabulary creation
+    create_vocab_btn.click(
+        fn=create_vocabulary,
+        inputs=[vocabulary_name, vocabulary_file],
+        outputs=[vocab_status]
+    )
+
+    def update_outputs(results):
+        if not results:
+            return None, None, None, None, None, None
+        
+        # Format results for dataframe
+        segments_data = []
+        for i, segment in enumerate(results):
+            # Extract timestamp from transcript
+            transcript = segment.get("transcript", "")
+            timestamp = transcript.split(" ")[0] if transcript else "N/A"
+            # Format classifications for display
+            classifications_text = ""
+            if "classifications" in segment:
+                for j, classification in enumerate(segment["classifications"]):
+                    if "error" in classification:
+                        classifications_text += f"Frame {j+1}: Error - {classification['error']}\n"
+                    else:
+                        classifications_text += f"Frame {j+1}: {classification.get('category', 'N/A')} - {classification.get('sub_category', 'N/A')} (Confidence: {classification.get('confidence', 0)}%)\n"
+            
+            segments_data.append([
+                f"Segment {i+1}",
+                timestamp,
+                transcript,
+                classifications_text
+            ])
+        
+        # Display first segment's results by default
+        first_segment = results[0]
+        # Show all frames' classifications
+        first_classification = ""
+        if "classifications" in first_segment:
+            for i, classification in enumerate(first_segment["classifications"]):
+                first_classification += f"Frame {i+1}:\n"
+                if "error" in classification:
+                    first_classification += f"Error: {classification['error']}\n"
+                else:
+                    first_classification += f"Category: {classification.get('category', 'N/A')}\n"
+                    first_classification += f"Sub-category: {classification.get('sub_category', 'N/A')}\n"
+                    first_classification += f"Confidence: {classification.get('confidence', 0)}%\n"
+                    if classification.get('comments'):
+                        first_classification += f"Comments: {classification['comments']}\n"
+                first_classification += "\n"
+
+        return (
+            results,  # Store results
+            segments_data,  # Dataframe
+            first_segment["frames"],  # Gallery
+            first_segment["video"],  # Video path
+            first_segment["transcript"],  # Text
+            first_classification  # Classification results
+        )
+
+    def on_segment_select(evt: gr.SelectData, stored_results):
+        if not stored_results:
+            return None, None, None, None
+        
+        # evt.index is a list containing [row, column], we want the row index
+        row_idx = evt.index[0]
+        if row_idx >= len(stored_results):
+            return None, None, None, None
+        
+        segment = stored_results[row_idx]
+        # Show all frames' classifications for selected segment
+        classification_text = ""
+        if "classifications" in segment:
+            for i, classification in enumerate(segment["classifications"]):
+                classification_text += f"Frame {i+1}:\n"
+                if "error" in classification:
+                    classification_text += f"Error: {classification['error']}\n"
+                else:
+                    classification_text += f"Category: {classification.get('category', 'N/A')}\n"
+                    classification_text += f"Sub-category: {classification.get('sub_category', 'N/A')}\n"
+                    classification_text += f"Confidence: {classification.get('confidence', 0)}%\n"
+                    if classification.get('comments'):
+                        classification_text += f"Comments: {classification['comments']}\n"
+                classification_text += "\n"
+        
+        return (
+            segment["frames"],  # Gallery
+            segment["video"],  # Video path
+            segment["transcript"],  # Text
+            classification_text  # Classification results
+        )
+
+    def on_gallery_select(evt: gr.SelectData, stored_results):
+        if not stored_results or not evt.index:
+            return None
+        
+        # Find the current segment and frame
+        for segment in stored_results:
+            if len(segment["frames"]) > evt.index and len(segment["classifications"]) > evt.index:
+                classification = segment["classifications"][evt.index]
+                if "error" in classification:
+                    return f"Error: {classification['error']}"
+                
+                result = f"Category: {classification.get('category', 'N/A')}\n"
+                result += f"Sub-category: {classification.get('sub_category', 'N/A')}\n"
+                result += f"Confidence: {classification.get('confidence', 0)}%\n"
+                if classification.get('comments'):
+                    result += f"Comments: {classification['comments']}"
+                return result
+        return None
+
+    def reset_gallery():
+        return [], None
+
+    def process_with_progress(video, service_val, lang, buf, min_seg, method_val, frames, thresh, frame_diff, model_id,sentences_mappings,ignore_unrelated,vocabulary_name,enable_img_classify,show_original):
+        # Clear all outputs
+        log_output.value = ""  # Clear previous logs
+        try:
+            progress_gen = process_video(video, service_val, lang, buf, min_seg, method_val, frames, thresh, frame_diff, model_id, sentences_mappings,ignore_unrelated,vocabulary_name,enable_img_classify,show_original)
+            results = None
+            
+            # Process all items from the generator
+            for item in progress_gen:
+                if isinstance(item, str):
+                    # This is a progress message
+                    log_output.value += item + "\n"
+                    yield [log_output.value, None]
+                else:
+                    # This is the final results
+                    results = item
+            
+            if results:
+                yield [log_output.value, results]
+            else:
+                raise gr.Error("No results were generated")
+                
+        except Exception as e:
+            log_output.value += f"Error: {str(e)}\n"
+            yield [log_output.value, None]
+            raise gr.Error(str(e))
+
+    process_btn.click(
+        lambda: ("Processing video...", gr.update(interactive=False)),  # Set initial status, disable button
+        None,
+        [status_output, process_btn],
+        queue=False
+    ).then(
+        reset_gallery,
+        outputs=[gallery, video_output]
+    ).then(
+        process_with_progress,  # Process video with progress updates
+        inputs=[video_input, service, language, buffer, min_segment,
+                method, num_frames, threshold, min_frame_diff, model_id, sentences_mappings,ignore_unrelated,vocabulary_name,enable_img_classify,show_original],
+        outputs=[log_output, results_store],
+        show_progress=True
+    ).then(
+        update_outputs,  # Update UI with results
+        inputs=[results_store],
+        outputs=[results_store, segments_list, gallery, video_output, text_output, classification_output]
+    ).then(
+        lambda: ("Ready to process another video", gr.update(interactive=True)),  # Reset status and enable button
+        None,
+        [status_output, process_btn],
+        queue=False
+    )
+
+    segments_list.select(
+        on_segment_select,
+        inputs=[results_store],
+        outputs=[gallery, video_output, text_output, classification_output]
+    )
+
+    gallery.select(
+        on_gallery_select,
+        inputs=[results_store],
+        outputs=[classification_output]
+    )
+
+
+IMG_MAP = {}
+
+QA_SYSTEM_PROMPT= """
+你是一位经验丰富的汽车检验专家。我将为你提供一系列汽车图片。请仔细分析这些图片,并回答用户的相关问题。在分析过程中:
+- 如果图片中出现人手或其他人体部位,则代表该区域有异常,请特别注意该区域。
+- 如果无法从图片中找到某个问题的答案,请诚实地说明'从图片中无法确定'。
+- 请提供尽可能详细和专业的分析,包括车辆外观、内部结构、可能存在的问题等。
+- 如果发现任何安全隐患或异常情况,请重点指出。
+"""
+
+def gr_messages_to_bedrock(gr_messages, model_id):
+    bedrock_messages = []
+    img_cnt = 1
+    for gr_msg in gr_messages:
+        role = gr_msg['role']
+        gr_content = gr_msg['content']
+        image_input = False
+        if isinstance(gr_content, str):
+            content = [{'text': gr_content}]
+        elif isinstance(gr_content, gr.Image):
+            role = 'user'
+            content = [{'image': {'format': 'jpeg', 'source':{'bytes': IMG_MAP[gr_content]}}}]
+            image_input = True
+        else:
+            raise
+        if image_input and 'nova' in model_id.lower():
+            bedrock_messages.append({'role': role, 'content': [{'text': f'Image {img_cnt}:'}]})
+            img_cnt += 1
+        bedrock_messages.append({'role': role, 'content': content})
+    return bedrock_messages
+
+
+def vqa_chat(message, chat_history, model_id, knowledge_base_id, number_of_results=5):
+    s3 = boto3.client('s3')
+    if message is not None and len(chat_history) == 0:
+        retrieved_info = call_retrieve(knowledge_base_id, message, number_of_results=number_of_results)
+        retrieved_info = retrieved_info[::-1]
+        for item in retrieved_info:
+            s3_path = item['metadata']['s3_path']
+            bucket_name = s3_path.split('/')[2]
+            object_key = '/'.join(s3_path.split('/')[3:])
+            try:
+                response = s3.get_object(Bucket=bucket_name, Key=object_key)
+                image_content = response['Body'].read()
+                gr_image = gr.Image(Image.open(io.BytesIO(image_content)))
+                IMG_MAP[gr_image] = image_content
+            except Exception as e:
+                print(f"Error processing {s3_path}: {str(e)}")
+
+            chat_history.append({"role": "assistant", "content": gr_image})
+    chat_history.append({"role": "user", "content": message})
+
+    bedrock_messages = gr_messages_to_bedrock(chat_history, model_id=model_id)
+    
+    answer, _ = call_converse(model_id=model_id, messages=bedrock_messages, 
+                           system_prompt=QA_SYSTEM_PROMPT)
+    chat_history.append({"role": "assistant", "content": answer})
+
+    return "", chat_history
+
+
+def create_vqa_ui():
+    with gr.Column():
+        gr.Markdown("""
+        # Video QA
+        上传视频，完成类别留痕并支持对话问答。
+        
+        测试版本，已借助 Nova Pro 预处理两段视频并构建好数据库。
+        """)
+        knowledge_base_id = gr.Textbox(label='Bedrock Knowledge Base ID')
+        model_id = gr.Dropdown(choices=[
+                                'us.anthropic.claude-3-5-sonnet-20241022-v2:0', 'us.anthropic.claude-3-5-sonnet-20240620-v1:0',
+                                 'us.amazon.nova-pro-v1:0',
+                                'us.amazon.nova-lite-v1:0'
+                            ],
+                            value='us.amazon.nova-pro-v1:0',label="选择模型")
+
+        number_of_results = gr.Slider(1, 10, value=5, step=1, label="召回图片数量")
+
+        chatbot = gr.Chatbot(type="messages")
+        msg = gr.Textbox()
+        clear = gr.ClearButton([msg, chatbot])
+
+        msg.submit(vqa_chat, [msg, chatbot, model_id, knowledge_base_id, number_of_results], [msg, chatbot])
+
+
 def create_ui():
     with gr.Blocks(title="Video Transcriber and Analyzer") as app:
-        with gr.Tab("Transcriber"):
-            gr.Markdown("""
-            # Video Transcriber and Analyzer
-            上传视频，截取初视频中有说话的片段，转录字幕，并抽取关键帧，识别图片内容
-            """)
-            
-            with gr.Row():
-                with gr.Column():
-                    video_input = gr.Video(label="Upload Video")
-                    with gr.Row():
-                        service = gr.Dropdown(choices=["aws"], value="aws", label="Transcription Service", visible=False)
-                        language = gr.Dropdown(choices=["Chinese", "English", "auto"], value="Chinese", label="语言")
-                        sentences_mappings = gr.Textbox(label="常见口音修正字典(Markdown格式：原始 ｜ 正确)",
-                                                        lines=10, 
-                                                        value=DEFAULT_DICT)
-                    with gr.Row():
-                        vocabulary_name = gr.Textbox(label="Transcribe自定义字典",
-                                                        lines=1,
-                                                        value=CUSTOM_VOCABULARY)
-                        vocabulary_file = gr.File(label="上传自定义字典文件(.txt或.xlsx)")
-                    with gr.Row():
-                        create_vocab_btn = gr.Button("创建字典", variant='secondary')
-                        vocab_status = gr.Markdown("字典状态: 未创建")
-                    
-                    with gr.Row():
-                        buffer = gr.Number(
-                                value=0.5, 
-                                minimum=0.1,
-                                maximum=2,
-                                step=0.1,
-                                label="视频片段前后添加窗口 (seconds)")
-                        min_segment = gr.Number(
-                                value=1.0, 
-                                minimum=0.1,
-                                maximum=2,
-                                step=0.1,
-                                label="视频片段最小长度(seconds)")
-                    
-                    with gr.Row():
-                        method = gr.Dropdown(choices=["uniform", "random", "difference"], value="uniform", label="关键帧抽取方法")
-                        num_frames = gr.Number(value=1, minimum=1, maximum=10, label="关键帧数量", precision=0)
-                    
-                    with gr.Row():
-                        threshold = gr.Number(value=0.85, minimum=0.05, step=0.01, maximum=1.0,label="关键帧相似度阈值(只对difference方法)")
-                        min_frame_diff = gr.Number(value=0.5,minimum=0.1, step=0.1, maximum=10.0, label="帧之间最小间隔(seconds)")
-                    
-                    with gr.Row():
-                        model_id = gr.Dropdown(
-                            choices=[
-                                ('CLAUDE_SONNET_35',CLAUDE_SONNET_35_MODEL_ID),
-                                ("Nova Lite", LITE_MODEL_ID),
-                                ("Nova Pro", PRO_MODEL_ID)
-                            ],
-                            value=LITE_MODEL_ID,
-                            label="图像分类模型"
-                        )
-                        enable_img_classify = gr.Checkbox(
-                                label="启用关键帧分类",
-                                value=False,
-                                info="对关键帧图片分类"
-                            )
-                        ignore_unrelated = gr.Checkbox(
-                                label="忽略无关内容",
-                                value=True,
-                                info="取消可以查看原始转录错误，用于添加到口音修正字典中"
-                            )
-                        show_original = gr.Checkbox(
-                                label="显示修正前文本",
-                                value=False,
-                                info="用于查看原始转录错误，用于添加到口音修正字典中"
-                            )
-                    
-                    process_btn = gr.Button("Process Video", interactive=True,variant='primary')
-                    log_output = gr.Textbox(label="Processing Log", lines=10, max_lines=10)
-
-                with gr.Column():
-                    status_output = gr.Markdown("Ready to process video")
-                    segments_list = gr.Dataframe(
-                        headers=["Segment", "Duration", "Transcript", "Classifications"],
-                        label="Processed Segments",
-                        interactive=False
-                    )
-                    gallery = gr.Gallery(label="Extracted Frames")
-                    video_output = gr.Video(label="Video Segment")
-                    text_output = gr.Textbox(label="Transcription", lines=3)
-                    classification_output = gr.Textbox(label="Classification Results", lines=5)
-
-        # Store results globally for access in callbacks
-        results_store = gr.State([])
-        
-        # Handle vocabulary creation
-        create_vocab_btn.click(
-            fn=create_vocabulary,
-            inputs=[vocabulary_name, vocabulary_file],
-            outputs=[vocab_status]
-        )
-
-        def update_outputs(results):
-            if not results:
-                return None, None, None, None, None, None
-            
-            # Format results for dataframe
-            segments_data = []
-            for i, segment in enumerate(results):
-                # Extract timestamp from transcript
-                transcript = segment.get("transcript", "")
-                timestamp = transcript.split(" ")[0] if transcript else "N/A"
-                # Format classifications for display
-                classifications_text = ""
-                if "classifications" in segment:
-                    for j, classification in enumerate(segment["classifications"]):
-                        if "error" in classification:
-                            classifications_text += f"Frame {j+1}: Error - {classification['error']}\n"
-                        else:
-                            classifications_text += f"Frame {j+1}: {classification.get('category', 'N/A')} - {classification.get('sub_category', 'N/A')} (Confidence: {classification.get('confidence', 0)}%)\n"
-                
-                segments_data.append([
-                    f"Segment {i+1}",
-                    timestamp,
-                    transcript,
-                    classifications_text
-                ])
-            
-            # Display first segment's results by default
-            first_segment = results[0]
-            # Show all frames' classifications
-            first_classification = ""
-            if "classifications" in first_segment:
-                for i, classification in enumerate(first_segment["classifications"]):
-                    first_classification += f"Frame {i+1}:\n"
-                    if "error" in classification:
-                        first_classification += f"Error: {classification['error']}\n"
-                    else:
-                        first_classification += f"Category: {classification.get('category', 'N/A')}\n"
-                        first_classification += f"Sub-category: {classification.get('sub_category', 'N/A')}\n"
-                        first_classification += f"Confidence: {classification.get('confidence', 0)}%\n"
-                        if classification.get('comments'):
-                            first_classification += f"Comments: {classification['comments']}\n"
-                    first_classification += "\n"
-
-            return (
-                results,  # Store results
-                segments_data,  # Dataframe
-                first_segment["frames"],  # Gallery
-                first_segment["video"],  # Video path
-                first_segment["transcript"],  # Text
-                first_classification  # Classification results
-            )
-
-        def on_segment_select(evt: gr.SelectData, stored_results):
-            if not stored_results:
-                return None, None, None, None
-            
-            # evt.index is a list containing [row, column], we want the row index
-            row_idx = evt.index[0]
-            if row_idx >= len(stored_results):
-                return None, None, None, None
-            
-            segment = stored_results[row_idx]
-            # Show all frames' classifications for selected segment
-            classification_text = ""
-            if "classifications" in segment:
-                for i, classification in enumerate(segment["classifications"]):
-                    classification_text += f"Frame {i+1}:\n"
-                    if "error" in classification:
-                        classification_text += f"Error: {classification['error']}\n"
-                    else:
-                        classification_text += f"Category: {classification.get('category', 'N/A')}\n"
-                        classification_text += f"Sub-category: {classification.get('sub_category', 'N/A')}\n"
-                        classification_text += f"Confidence: {classification.get('confidence', 0)}%\n"
-                        if classification.get('comments'):
-                            classification_text += f"Comments: {classification['comments']}\n"
-                    classification_text += "\n"
-            
-            return (
-                segment["frames"],  # Gallery
-                segment["video"],  # Video path
-                segment["transcript"],  # Text
-                classification_text  # Classification results
-            )
-
-        def on_gallery_select(evt: gr.SelectData, stored_results):
-            if not stored_results or not evt.index:
-                return None
-            
-            # Find the current segment and frame
-            for segment in stored_results:
-                if len(segment["frames"]) > evt.index and len(segment["classifications"]) > evt.index:
-                    classification = segment["classifications"][evt.index]
-                    if "error" in classification:
-                        return f"Error: {classification['error']}"
-                    
-                    result = f"Category: {classification.get('category', 'N/A')}\n"
-                    result += f"Sub-category: {classification.get('sub_category', 'N/A')}\n"
-                    result += f"Confidence: {classification.get('confidence', 0)}%\n"
-                    if classification.get('comments'):
-                        result += f"Comments: {classification['comments']}"
-                    return result
-            return None
-
-        def reset_gallery():
-            return [], None
-
-        def process_with_progress(video, service_val, lang, buf, min_seg, method_val, frames, thresh, frame_diff, model_id,sentences_mappings,ignore_unrelated,vocabulary_name,enable_img_classify,show_original):
-            # Clear all outputs
-            log_output.value = ""  # Clear previous logs
-            try:
-                progress_gen = process_video(video, service_val, lang, buf, min_seg, method_val, frames, thresh, frame_diff, model_id, sentences_mappings,ignore_unrelated,vocabulary_name,enable_img_classify,show_original)
-                results = None
-                
-                # Process all items from the generator
-                for item in progress_gen:
-                    if isinstance(item, str):
-                        # This is a progress message
-                        log_output.value += item + "\n"
-                        yield [log_output.value, None]
-                    else:
-                        # This is the final results
-                        results = item
-                
-                if results:
-                    yield [log_output.value, results]
-                else:
-                    raise gr.Error("No results were generated")
-                    
-            except Exception as e:
-                log_output.value += f"Error: {str(e)}\n"
-                yield [log_output.value, None]
-                raise gr.Error(str(e))
-
-        process_btn.click(
-            lambda: ("Processing video...", gr.update(interactive=False)),  # Set initial status, disable button
-            None,
-            [status_output, process_btn],
-            queue=False
-        ).then(
-            reset_gallery,
-            outputs=[gallery, video_output]
-        ).then(
-            process_with_progress,  # Process video with progress updates
-            inputs=[video_input, service, language, buffer, min_segment,
-                   method, num_frames, threshold, min_frame_diff, model_id, sentences_mappings,ignore_unrelated,vocabulary_name,enable_img_classify,show_original],
-            outputs=[log_output, results_store],
-            show_progress=True
-        ).then(
-            update_outputs,  # Update UI with results
-            inputs=[results_store],
-            outputs=[results_store, segments_list, gallery, video_output, text_output, classification_output]
-        ).then(
-            lambda: ("Ready to process another video", gr.update(interactive=True)),  # Reset status and enable button
-            None,
-            [status_output, process_btn],
-            queue=False
-        )
-
-        segments_list.select(
-            on_segment_select,
-            inputs=[results_store],
-            outputs=[gallery, video_output, text_output, classification_output]
-        )
-
-        gallery.select(
-            on_gallery_select,
-            inputs=[results_store],
-            outputs=[classification_output]
-        )
-
-    return app
+        with gr.Tab('Transcriber'):
+            create_transcribe_ui()
+        with gr.Tab('VQA'):
+            create_vqa_ui()
+        return app
 
 if __name__ == "__main__":
     app = create_ui()

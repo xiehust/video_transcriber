@@ -7,6 +7,10 @@ from botocore.config import Config
 from dotenv import load_dotenv
 import argparse
 import logging
+import time
+import random
+
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(os.path.basename(__file__))
 
@@ -164,34 +168,37 @@ class ImageClassifier:
         self.bedrock_runtime = session.client(service_name = 'bedrock-runtime', 
                                  config=config)
 
-    def process(self,image_path) -> str:
-        try:
-            with open(image_path, "rb") as file:
-                media_bytes = file.read()
-                user_message = "请对图片进行分类."
-                messages = [ 
-                    { "role": "user", "content": [
-                        {"image": {"format": "jpeg", "source": {"bytes": media_bytes}}},
-                        {"text": user_message}
-                    ]},
-                    {
-                        "role": "assistant", "content": [
-                            {"text": "```json"}
+    def process(self,image_path, max_retry=20) -> str:
+        for attempt in range(max_retry):
+            try:
+                with open(image_path, "rb") as file:
+                    media_bytes = file.read()
+                    user_message = "请对图片进行分类."
+                    messages = [ 
+                        { "role": "user", "content": [
+                            {"image": {"format": "jpeg", "source": {"bytes": media_bytes}}},
+                            {"text": user_message}
+                        ]},
+                        {
+                            "role": "assistant", "content": [
+                                {"text": "```json"}
+                            ]
+                        }
                         ]
-                    }
-                    ]
 
-                response = self.bedrock_runtime.converse(
-                    modelId=self.model_id,
-                    messages=messages,
-                    inferenceConfig={"temperature": 0.0},
-                    system=[{"text":SYSTEM}]
-                )
-                logger.info(response['usage'])
-                return response['output']['message']['content'][0]['text']
-        except Exception as e:
-            logger.error(e)
-            return str(e)
+                    response = self.bedrock_runtime.converse(
+                        modelId=self.model_id,
+                        messages=messages,
+                        inferenceConfig={"temperature": 0.0},
+                        system=[{"text":SYSTEM}]
+                    )
+                    logger.info(response['usage'])
+                    return response['output']['message']['content'][0]['text']
+            except Exception as e:
+                logger.warning(f'Retry {attempt + 1}/{max_retry} due to error: {e}')
+                time.sleep(random.randint(1, 3))
+        raise RuntimeError(f'Calling BedRock failed after retrying for {max_retry} times.')
+
 
 
 if __name__ == "__main__":

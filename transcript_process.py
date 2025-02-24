@@ -4,6 +4,9 @@ import os
 from botocore.config import Config
 from dotenv import load_dotenv
 from image_classify import PRO_MODEL_ID,LITE_MODEL_ID, CLAUDE_SONNET_35_MODEL_ID
+import time
+import random
+
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(os.path.basename(__file__))
@@ -49,21 +52,24 @@ class TranscriptProcessor:
         self.bedrock_runtime = session.client(service_name = 'bedrock-runtime', 
                                  config=config)
 
-    def process(self,user_message,sentences_mappings) -> str:
-        try:
-            messages = [ { "role": "user", "content": [{"text": user_message}]},
-                        { "role": "assistant", "content": [{"text": "纠正后结果是:"}]}]
-            response = self.bedrock_runtime.converse(
-                modelId=self.model_id,
-                messages=messages,
-                inferenceConfig={"temperature": 0.0},
-                system=[{"text":SYSTEM.format(sentences_mappings=sentences_mappings)}]
-            )
-            logger.info(response['usage'])
-            return response['output']['message']['content'][0]['text']
-        except Exception as e:
-            logger.error(e)
-            return str(e)
+    def process(self,user_message,sentences_mappings, max_retry=20) -> str:
+        for attempt in range(max_retry):
+            try:
+                messages = [ { "role": "user", "content": [{"text": user_message}]},
+                            { "role": "assistant", "content": [{"text": "纠正后结果是:"}]}]
+                response = self.bedrock_runtime.converse(
+                    modelId=self.model_id,
+                    messages=messages,
+                    inferenceConfig={"temperature": 0.0},
+                    system=[{"text":SYSTEM.format(sentences_mappings=sentences_mappings)}]
+                )
+                logger.info(response['usage'])
+                return response['output']['message']['content'][0]['text']
+            except Exception as e:
+                logger.warning(f'Retry {attempt + 1}/{max_retry} due to error: {e}')
+                time.sleep(random.randint(1, 3))
+        raise RuntimeError(f'Calling BedRock failed after retrying for {max_retry} times.')
+
 
 
 if __name__ == "__main__":
