@@ -16,6 +16,7 @@ import io
 from pydub import AudioSegment
 from extract_video_frames import extract_video_frames
 from datetime import datetime
+import time
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -164,11 +165,12 @@ class VideoTranscriber:
         """Process the video file and extract segments with speech"""
         # Create output directory if it doesn't exist
         Path(output_dir).mkdir(parents=True, exist_ok=True)
-        
+        t1 = time.time()
         # Extract audio
         yield "Extracting audio from video..."
         audio_path = self.extract_audio()
-        
+        t2 =  time.time()
+        yield f"Extracting audio from video completed! time cost: {t2-t1:.1f} s"
         # Transcribe audio using selected service
         yield f"Transcribing audio using {self.service}..."
         if self.service == "aws":
@@ -178,8 +180,11 @@ class VideoTranscriber:
             return
         
         if not transcript:
-            yield "Error: Transcription failed"
+            yield "Error: Transcribing failed"
             return
+        t3 =  time.time()
+        yield f"Transcribing job completed! time cost: {t3-t2:.1f} s"
+
         
         # Process segments
         segments = transcript.get("segments", [])
@@ -220,6 +225,9 @@ class VideoTranscriber:
                         f.write(f"{start_time}-{end_time}: {text}")
             else:
                 yield f"Error: Failed to extract segment {idx + 1}"
+        t4 = time.time()
+        yield f"Processing {total_segments} segments completed! time cost: {t4-t3:.1f} s"
+        yield f"Total job completed! time cost: {t4-t1:.1f} s"
 
         # Clean up audio file
         try:

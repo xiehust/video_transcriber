@@ -12,6 +12,7 @@ import os
 from botocore.exceptions import ClientError
 from requests.exceptions import RequestException
 import re
+import time
 from transcript_process import TranscriptProcessor, PRO_MODEL_ID, LITE_MODEL_ID, CLAUDE_SONNET_35_MODEL_ID
 
 transcipt_sentence = TranscriptProcessor(model_id=CLAUDE_SONNET_35_MODEL_ID)
@@ -374,17 +375,22 @@ class TranscribeTool():
                         return self.create_text_message(text=error)
                 else:
                     s3_path_result = file_url
-
+                
+                t1 = time.time()
                 transcript_file_uri, error = self._transcribe_audio(
                     audio_file_uri=s3_path_result,
                     file_type=file_type,
                     **extra_args
                 )
+                t2 = time.time()
+                logger.info(f"transcribe service response cost time:{t2-t1:1f} s")
                 if not transcript_file_uri:
                     return self.create_text_message(text=error)
 
                 # Download and read the transcript
                 transcript_text, error = self._download_and_read_transcript(transcript_file_uri,sentences_mappings = sentences_mappings,ignore_unrelated=ignore_unrelated,show_original=show_original)
+                t3 = time.time()
+                logger.info(f"transcription refinement cost time:{t3-t2:1f} s")
                 if not transcript_text:
                     return self.create_text_message(text=error)
 

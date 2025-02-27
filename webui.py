@@ -51,7 +51,11 @@ DEFAULT_DICT="""
 | 几个丢失 | 机盖锈蚀 |
 | 地板酒水儿 | 地板有水印 |
 | 昨天们内饰把破锁 | 左前门内饰板破损 |
-| 左前轮毂剐蹭 | 左前轮毂剐蹭|
+| 左前轮毂剐蹭 | 左前轮毂剐蹭 |
+| 是百花纷。| 后备箱饰板划痕 |
+| 第三下不好更好 | 地毯下部正常 |
+| 比如说钟头 | 雨刷正常 |
+| 左侧后门人家 | 左侧后视镜 |
 """
 
 def safe_json_loads(text:str):
@@ -243,7 +247,7 @@ def create_transcribe_ui():
                 
                 with gr.Row():
                     buffer = gr.Number(
-                            value=0.5, 
+                            value=1.0, 
                             minimum=0.1,
                             maximum=2,
                             step=0.1,
